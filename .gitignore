@@ -1,0 +1,14 @@
+# Raw ICPSR data: redistribution is not permitted under the ICPSR Terms of Use
+ICPSR_*/
+
+# R session files
+.RData
+.RDataTmp
+.Rhistory
+.Rproj.user/
+
+# Knitted output caches
+*_cache/
+*_files/
+
+.DS_Store

@@ -1,0 +1,1113 @@
+---
+title: "IJ_Crime_Reporting_Data"
+author: "Dilruba Tas"
+date: "2026-10-22"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+options(survey.lonely.psu = "adjust")
+
+library(tidyverse)
+library(patchwork)
+library(survey)
+library(marginaleffects)
+library(modelsummary)
+library(knitr)
+```
+
+
+```{r}
+
+##2020
+## DS0005 
+
+`38090.0005.Data` <- read.delim("ICPSR_38090/DS0005/38090-0005-Data.tsv")
+
+```
+
+
+```{r}
+
+##2021 
+ `38429.0005.Data` <- read.delim("ICPSR_38429/DS0005/38429-0005-Data.tsv")
+```
+
+
+
+```{r}
+
+## 2022
+`38603.0005.Data` <- read.delim("ICPSR_38603/DS0005/38603-0005-Data.tsv")
+
+
+```
+
+
+```{r}
+## 2023
+`38962.0005.Data` <- read.delim("ICPSR_38962/DS0005/38962-0005-Data.tsv")
+```
+
+
+
+
+```{r}
+
+vars <- c("IDHH", "IDPER", "V4399", "V4400", "V4421", "V4422", "V4423",
+          "V4436", "V4437", "V4529", "WGTVICCY", "YEARQ", "SERIES_IWEIGHT",
+          "V2117", "V2118",                    # variance strata and PSU
+          "V4022",                             # location (1 = outside U.S.)
+          "V4411", "V4412", "V4413", "V4414")  # police-related reasons (all that apply)
+
+
+incidents_2020 <- `38090.0005.Data`  %>% select(all_of(vars))
+incidents_2021 <-  `38429.0005.Data`  %>% select(all_of(vars))
+incidents_2022 <- `38603.0005.Data`   %>% select(all_of(vars))
+incidents_2023 <- `38962.0005.Data`   %>% select(all_of(vars))
+
+# BJS excludes incidents that occurred outside the U.S. from published estimates
+merged_all <- bind_rows(incidents_2020, incidents_2021, incidents_2022, incidents_2023) %>%
+  filter(parse_number(as.character(V4022)) != 1)
+
+```
+
+```{r}
+
+toc_codes <- c(1:29, 31:41, 54:59)
+toc_labels <- c(
+  # Violent (1-20)
+  "Completed rape", "Attempted rape",
+  "Sexual assault with serious assault", "Sexual assault with minor assault",
+  "Robbery with injury, serious assault", "Robbery with injury, minor assault",
+  "Robbery without injury",
+  "Attempted robbery with injury, serious assault",
+  "Attempted robbery with injury, minor assault",
+  "Attempted robbery without injury",
+  "Aggravated assault with injury",
+  "Attempted aggravated assault with weapon",
+  "Threatened assault with weapon",
+  "Simple assault with injury",
+  "Sexual assault without injury",
+  "Unwanted sexual contact without force",
+  "Assault without weapon, without injury",
+  "Verbal threat of rape", "Verbal threat of sexual assault",
+  "Verbal threat of assault",
+  # Personal theft with contact (21-23)
+  "Purse snatching", "Attempted purse snatching", "Pocket picking",
+  # Old code list: personal larceny without contact (24-29)
+  "Personal larceny without contact, < $10",
+  "Personal larceny without contact, $10-49",
+  "Personal larceny without contact, $50-249",
+  "Personal larceny without contact, $250+",
+  "Personal larceny without contact, value NA",
+  "Attempted personal larceny without contact",
+  # Burglary (31-33)
+  "Burglary, forcible entry", "Burglary, entry without force",
+  "Attempted forcible entry",
+  # Old code list: household larceny (34-39)
+  "Household larceny, < $10", "Household larceny, $10-49",
+  "Household larceny, $50-249", "Household larceny, $250+",
+  "Household larceny, value NA", "Attempted household larceny",
+  # Motor vehicle theft (40-41)
+  "Motor vehicle theft", "Attempted motor vehicle theft",
+  # New code list: theft (54-59)
+  "Theft, < $10", "Theft, $10-49", "Theft, $50-249", "Theft, $250+",
+  "Theft, value NA", "Attempted theft"
+)
+
+```
+
+
+```{r}
+
+main_df <- merged_all %>%
+  select(all_of(vars)) %>%
+  rename(id_household = IDHH, id_person = IDPER, year_quarter = YEARQ, reported_police = V4399, police_found_out = V4400, reason_not_reported = V4421, reason_not_reported_most = V4422, reason_reported = V4423, reason_reported_res = V4436, reason_reported_most = V4437, type_of_crime = V4529, weight_victim = WGTVICCY, weight_series = SERIES_IWEIGHT,
+         var_strata = V2117, var_psu = V2118,
+         nr_police_not_important = V4411, nr_police_ineffective = V4412,
+         nr_police_biased = V4413, nr_offender_police = V4414) %>%
+  mutate(year = floor(as.numeric(as.character(year_quarter))),
+         across(c(reported_police, police_found_out, reason_not_reported,
+             reason_not_reported_most, reason_reported, reason_reported_res,
+             reason_reported_most, type_of_crime),
+             ~ parse_number(as.character(.x))),
+         # 0 = No, 1 = Yes; 8 (residue) and 9 (out of universe) become NA
+         across(starts_with("nr_"),
+             ~ if_else(parse_number(as.character(.x)) %in% 0:1,
+                       parse_number(as.character(.x)), NA_real_)),
+         design_strata = interaction(year, var_strata, drop = TRUE),
+             reported_police = factor(reported_police, levels = c(1,2,3,8)),
+             police_found_out = factor(police_found_out, levels = c(1,2,3,4,5,6,7,98,99)),
+             reason_not_reported_most = factor(reason_not_reported_most, levels = c(1:19, 30, 98, 99)), 
+             reason_reported_most = factor(reason_reported_most, levels = c(1:12, 21:22, 98:99)),
+             reported_police = fct_recode(reported_police, 
+                                 "Yes"        = "1",
+                                 "No"         = "2",
+                                 "Don't know" = "3",
+                                 "Residue"    = "8"), 
+             police_found_out = fct_recode(police_found_out, 
+                                "Respondent"             = "1",
+                                "Other Household Member" = "2",
+                                "Someone Official"       = "3",
+                                "Someone else"           = "4",
+                                "Police at scene"        = "5",
+                                "Offender was a police officer"                = "6",
+                                "Some other way"        = "7",
+                                "Residue"               = "98",
+                                "Oou"                   = "99"),
+             crime_detail = factor(type_of_crime, levels = toc_codes, labels = toc_labels),
+
+              crime_type = case_when(
+                 type_of_crime %in% c(1:4, 15, 16, 18, 19) ~ "Rape/sexual assault",
+                 type_of_crime %in% 5:10                   ~ "Robbery",
+                 type_of_crime %in% 11:13                  ~ "Aggravated assault",
+                 type_of_crime %in% c(14, 17, 20)          ~ "Simple assault",
+                 type_of_crime %in% 21:23                  ~ "Personal theft (with contact)",
+                 type_of_crime %in% 31:33                  ~ "Burglary",
+                 type_of_crime %in% 40:41                  ~ "Motor vehicle theft",
+                 type_of_crime %in% c(54:59, 24:29, 34:39) ~ "Other theft",
+         TRUE ~ NA_character_
+    ),
+           crime_type = factor(crime_type, levels = c(
+            "Rape/sexual assault", "Robbery", "Aggravated assault", "Simple assault",
+            "Personal theft (with contact)", "Burglary", "Motor vehicle theft", "Other theft"
+    )),
+
+           crime_class = case_when(
+                type_of_crime %in% 1:20                          ~ "Violent",
+                type_of_crime %in% 21:23                         ~ "Personal theft",
+                type_of_crime %in% c(31:33, 40:41, 54:59, 24:29, 34:39) ~ "Property",
+      TRUE ~ NA_character_
+    ),
+    reason_not_reported_most = fct_recode(reason_not_reported_most,
+                                          
+      "Reported to another official"            = "1",
+      "Private or personal matter"              = "2",
+      "Minor or unsuccessful crime"             = "3",
+      "Child offender, kid stuff"               = "4",
+      "Not clear it was a crime"                = "5",
+      "No insurance, loss below deductible"     = "6",
+      "Found out too late"                      = "7",
+      "Could not recover property"              = "8",
+      "Could not identify offender"             = "9",
+      "Police would not think it important"     = "10",
+      "Police would be ineffective"             = "11",
+      "Police would be biased"                  = "12",
+      "Offender was a police officer"           = "13",
+      "Did not want to get offender in trouble" = "14",
+      "Advised not to report"                   = "15",
+      "Fear of reprisal"                        = "16",
+      "Too inconvenient"                        = "17",
+      "Other reason"                            = "18",
+      "Respondent not present, don't know"      = "19",
+      "No one reason more important"            = "30",
+      "Residue"                                 = "98",
+      "Oou"                                     = "99"
+    ),
+    reason_reported_most = fct_recode(reason_reported_most, 
+      "Stop or prevent this incident"              = "1",
+      "Needed help after incident"                 = "2",
+      "Recover property"                           = "3",
+      "Collect insurance"                          = "4",
+      "Prevent further crimes against household"   = "5",
+      "Stop offender from committing other crimes" = "6",
+      "Punish offender"                            = "7",
+      "Catch offender"                             = "8",
+      "Improve police surveillance of area"        = "9",
+      "Duty to tell police"                        = "10",
+      "Other reason"                               = "11",
+      "No other reason"                            = "12",
+      "No one reason more important"               = "21",
+      "Because it was a crime"                     = "22",
+      "Residue"                                    = "98",
+      "Oou"                                        = "99"
+    ),
+    reason_reported_group = fct_collapse(reason_reported_most,
+      "Stop or prevent crime"       = c("Stop or prevent this incident",
+                                        "Prevent further crimes against household",
+                                        "Stop offender from committing other crimes",
+                                        "Improve police surveillance of area"),
+      "Get help or recover losses"  = c("Needed help after incident",
+                                        "Recover property",
+                                        "Collect insurance"),
+      "Hold offender accountable"   = c("Punish offender",
+                                        "Catch offender"),
+      "Civic duty"                  = c("Duty to tell police",
+                                        "Because it was a crime"),
+      "Other"                       = c("Other reason",
+                                        "No other reason",
+                                        "No one reason more important")
+    ),
+     reason_not_reported_group = fct_collapse(reason_not_reported_most,
+      "Handled another way"      = "Reported to another official",
+      "Private/personal"         = "Private or personal matter",
+      "Not important enough"     = c("Minor or unsuccessful crime",
+                                     "Child offender, kid stuff",
+                                     "Not clear it was a crime",
+                                     "No insurance, loss below deductible"),
+      "Practical barriers"       = c("Found out too late",
+                                     "Could not recover property",
+                                     "Could not identify offender",
+                                     "Too inconvenient"),
+      "Police-related"           = c("Police would not think it important",
+                                     "Police would be ineffective",
+                                     "Police would be biased",
+                                     "Offender was a police officer"),
+      "Protecting offender/self" = c("Did not want to get offender in trouble",
+                                     "Advised not to report",
+                                     "Fear of reprisal"),
+      "Other"                    = c("Other reason",
+                                     "Respondent not present, don't know",
+                                     "No one reason more important")
+    )
+  )
+
+```
+
+
+
+```{r}
+unreported_by_type <- main_df %>%
+  filter(reported_police %in% c("Yes", "No"), !is.na(crime_type)) %>%
+  group_by(crime_type) %>%
+  summarise(
+    n_incidents    = n(),
+    pct_unreported = 100 * weighted.mean(reported_police == "No", w = weight_series),
+    .groups = "drop"
+  )
+```
+
+
+```{r}
+
+top_reason_by_type <- main_df %>%
+  filter(reported_police == "No",
+         !is.na(crime_type), !is.na(reason_not_reported_most)) %>%
+  count(crime_type, reason_not_reported_most, wt = weight_series) %>%
+  group_by(crime_type) %>%
+  mutate(pct_of_unreported = 100 * n / sum(n)) %>%
+  slice_max(pct_of_unreported, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(crime_type, top_reason = reason_not_reported_most, pct_of_unreported)
+
+chart1_df <- unreported_by_type %>%
+  left_join(top_reason_by_type, by = "crime_type") %>%
+  mutate(
+    label = paste0("Top reason: ", top_reason, " (", round(pct_of_unreported), "%)"),
+    crime_type = fct_reorder(crime_type, pct_unreported)
+  )
+
+p_unreported <- ggplot(chart1_df, aes(x = pct_unreported, y = crime_type)) +
+  geom_col(fill = "#3a86d4", width = 0.65) +
+  geom_text(aes(label = paste0(round(pct_unreported), "%")),
+            hjust = -0.15, fontface = "bold", size = 3.6) +
+  geom_text(aes(x = 2, label = label),
+            hjust = 0, vjust = -1.6, size = 3, color = "grey25") +
+  scale_x_continuous(limits = c(0, 100), expand = c(0, 0)) +
+  labs(
+    title = "Share of Victimizations Not Reported to Police, by Crime Type",
+    subtitle = "With the most common main reason for not reporting",
+    x = "Percent not reported (weighted)", y = NULL,
+    caption = "Source: National Crime Victimization Survey (BJS), all years pooled."
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.major.y = element_blank(),
+        plot.title.position = "plot")
+
+p_unreported
+```
+
+```{r}
+
+reasons_heat_df <- main_df %>%
+  filter(reported_police == "No",
+         !is.na(crime_type), !is.na(reason_not_reported_group)) %>%
+  count(crime_type, reason_not_reported_group, wt = weight_series) %>%
+  group_by(crime_type) %>%
+  mutate(pct = 100 * n / sum(n)) %>%
+  ungroup()
+
+```
+
+
+```{r}
+p_reasons_heat <- ggplot(reasons_heat_df,
+                         aes(x = reason_not_reported_group, y = fct_rev(crime_type), fill = pct)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(pct)), size = 3.2,
+            color = ifelse(reasons_heat_df$pct > 35, "white", "black")) +
+  scale_fill_gradient(low = "#eaf2fb", high = "#1d4f91", name = "% of\nunreported") +
+  labs(
+    title = "Main Reasons Victims Did Not Report to Police, by Crime Type",
+    x = NULL, y = NULL,
+    caption = "Source: NCVS (BJS), all years pooled."
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        panel.grid = element_blank(),
+        plot.title.position = "plot")
+
+p_reasons_heat
+```
+
+
+```{r}
+valid <- main_df %>% filter(reported_police %in% c("Yes", "No"))
+
+# Top 3 reasons FOR reporting (share of reported victimizations)
+top3_rep <- valid %>%
+  filter(reported_police == "Yes", !is.na(reason_reported_group)) %>%
+  count(reason = reason_reported_group, wt = weight_series) %>%
+  mutate(pct = 100 * n / sum(n)) %>%
+  slice_max(pct, n = 3) %>%
+  mutate(reason = fct_reorder(str_wrap(as.character(reason), 25), pct))
+
+# Top 3 reasons for NOT reporting (share of unreported victimizations)
+top3_unrep <- valid %>%
+  filter(reported_police == "No", !is.na(reason_not_reported_group)) %>%
+  count(reason = reason_not_reported_group, wt = weight_series) %>%
+  mutate(pct = 100 * n / sum(n)) %>%
+  slice_max(pct, n = 3) %>%
+  mutate(reason = fct_reorder(str_wrap(as.character(reason), 25), pct))
+
+x_max <- max(top3_rep$pct, top3_unrep$pct) * 1.2  
+
+make_panel <- function(df, fill, title) {
+  ggplot(df, aes(x = pct, y = reason)) +
+    geom_col(fill = fill, width = 0.6) +
+    geom_text(aes(label = paste0(round(pct), "%")),
+              hjust = -0.2, fontface = "bold", size = 4) +
+    scale_x_continuous(limits = c(0, x_max), expand = c(0, 0)) +
+    labs(title = title, x = NULL, y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid = element_blank(),
+          axis.text.x = element_blank(),
+          plot.title = element_text(face = "bold", color = fill))
+}
+
+p_rep   <- make_panel(top3_rep,   "#3a86d4", "Top reasons for reporting")
+p_unrep <- make_panel(top3_unrep, "#e07a3a", "Top reasons for not reporting")
+
+p_top3 <- (p_rep | p_unrep) +
+  plot_annotation(
+    title = "Why Victims Do and Don't Report Crimes to Police",
+    subtitle = "Main reason given, as a share of reported or unreported victimizations",
+    caption = "Source: National Crime Victimization Survey (BJS), all crime types and years pooled; weighted estimates."
+  )
+
+p_top3
+
+```
+
+
+```{r}
+valid <- main_df %>%
+  filter(reported_police %in% c("Yes", "No"), !is.na(crime_type))
+
+# Reporting rates by crime type (weighted, all years pooled)
+rates <- valid %>%
+  group_by(crime_type) %>%
+  summarise(
+    n = n(),
+    pct_reported   = 100 * weighted.mean(reported_police == "Yes", w = weight_series),
+    pct_unreported = 100 - pct_reported,
+    .groups = "drop"
+  )
+
+# Top reason FOR reporting, within each crime type
+top_rep <- valid %>%
+  filter(reported_police == "Yes", !is.na(reason_reported_group)) %>%
+  count(crime_type, reason_reported_group, wt = weight_series) %>%
+  group_by(crime_type) %>%
+  mutate(share = 100 * n / sum(n)) %>%
+  slice_max(share, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  transmute(crime_type,
+            rep_label = paste0(reason_reported_group, " (", round(share), "%)"))
+
+# Top reason for NOT reporting, within each crime type
+top_unrep <- valid %>%
+  filter(reported_police == "No", !is.na(reason_not_reported_group)) %>%
+  count(crime_type, reason_not_reported_group, wt = weight_series) %>%
+  group_by(crime_type) %>%
+  mutate(share = 100 * n / sum(n)) %>%
+  slice_max(share, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  transmute(crime_type,
+            unrep_label = paste0(reason_not_reported_group, " (", round(share), "%)"))
+
+butterfly_df <- rates %>%
+  left_join(top_rep,   by = "crime_type") %>%
+  left_join(top_unrep, by = "crime_type") %>%
+  mutate(crime_type = fct_reorder(crime_type, pct_reported))   
+
+
+inside_min <- 35  
+
+butterfly_df <- butterfly_df %>%
+  mutate(
+    rep_label_w   = str_wrap(rep_label, 20),
+    unrep_label_w = str_wrap(unrep_label, 20),
+    rep_inside    = pct_reported   >= inside_min,
+    unrep_inside  = pct_unreported >= inside_min
+  )
+
+txt_pct    <- 5.2   
+txt_reason <- 4.2  
+
+# ---- Left panel: reported (bars grow leftward) ----
+p_left <- ggplot(butterfly_df, aes(x = pct_reported, y = crime_type)) +
+  geom_col(fill = "#3a86d4", width = 0.8) +
+ 
+  geom_text(aes(label = paste0(round(pct_reported), "%")),
+            hjust = 1.1, fontface = "bold", size = txt_pct) +
+
+  geom_text(data = filter(butterfly_df, rep_inside),
+            aes(x = 2, label = rep_label_w),
+            hjust = 1, size = txt_reason, color = "white", lineheight = 0.9) +
+
+  geom_text(data = filter(butterfly_df, !rep_inside),
+            aes(x = pct_reported + 12, label = rep_label_w),
+            hjust = 1, size = txt_reason, color = "grey20", lineheight = 0.9) +
+  scale_x_reverse(limits = c(100, 0), expand = c(0, 0)) +
+  scale_y_discrete(position = "right") +
+  labs(title = "Reported to police", subtitle = "Top reason for reporting",
+       x = "Percent of victimizations", y = NULL) +
+  theme_minimal(base_size = 16) +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.y.right = element_text(size = 15, face = "bold", hjust = 0.5,
+                                         margin = margin(l = 8, r = 8)),
+        axis.text.x = element_text(size = 13),
+        plot.title = element_text(color = "#3a86d4", face = "bold", size = 18),
+        plot.subtitle = element_text(size = 14))
+
+# ---- Right panel: not reported (bars grow rightward) ----
+p_right <- ggplot(butterfly_df, aes(x = pct_unreported, y = crime_type)) +
+  geom_col(fill = "#e07a3a", width = 0.8) +
+  geom_text(aes(label = paste0(round(pct_unreported), "%")),
+            hjust = -0.1, fontface = "bold", size = txt_pct) +
+  geom_text(data = filter(butterfly_df, unrep_inside),
+            aes(x = 2, label = unrep_label_w),
+            hjust = 0, size = txt_reason, color = "white", lineheight = 0.9) +
+  geom_text(data = filter(butterfly_df, !unrep_inside),
+            aes(x = pct_unreported + 12, label = unrep_label_w),
+            hjust = 0, size = txt_reason, color = "grey20", lineheight = 0.9) +
+  scale_x_continuous(limits = c(0, 100), expand = c(0, 0)) +
+  labs(title = "Not reported to police", subtitle = "Top reason for not reporting",
+       x = "Percent of victimizations", y = NULL) +
+  theme_minimal(base_size = 16) +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_blank(),
+        axis.text.x = element_text(size = 13),
+        plot.title = element_text(color = "#e07a3a", face = "bold", size = 18),
+        plot.subtitle = element_text(size = 14))
+
+p_butterfly <- (p_left | p_right) +
+  plot_annotation(
+    title = "Which Crimes Victims Report to Police, and Why",
+    caption = "Source: National Crime Victimization Survey (BJS), 2020-2023; weighted estimates.\nReason shares are percentages of reported or unreported victimizations within each crime type.",
+    theme = theme(plot.title = element_text(size = 20, face = "bold"),
+                  plot.caption = element_text(size = 11))
+  )
+
+p_butterfly
+```
+```{r}
+ggsave("un_reported_reason.png", p_butterfly, width = 15, height = 8, dpi = 600)
+```
+
+
+
+```{r}
+
+police_reasons <- c("Police would not think it important",
+                    "Police would be ineffective",
+                    "Police would be biased",
+                    "Offender was a police officer")
+
+# --- Summary table by crime type (weighted, all years pooled) ---
+police_by_type <- main_df %>%
+  filter(reported_police %in% c("Yes", "No"), !is.na(crime_type)) %>%
+  mutate(
+    unreported     = reported_police == "No",
+    police_related = unreported & reason_not_reported_most %in% police_reasons
+  ) %>%
+  group_by(crime_type) %>%
+  summarise(
+    n_victimizations = n(),
+    n_unreported     = sum(unreported),
+    n_police_related = sum(police_related),
+    # Measure 1: share of UNREPORTED incidents due to police-related reasons
+    pct_of_unreported = 100 * sum(weight_series * police_related) /
+                              sum(weight_series * unreported),
+    # Measure 2: share of ALL victimizations unreported due to police-related reasons
+    pct_of_all        = 100 * weighted.mean(police_related, w = weight_series),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_of_unreported))
+
+police_by_type
+```
+
+```{r}
+
+# --- Breakdown by specific police-related reason, for the chart ---
+police_detail <- main_df %>%
+  filter(reported_police == "No", !is.na(crime_type),
+         !is.na(reason_not_reported_most)) %>%
+  group_by(crime_type) %>%
+  mutate(total_unreported = sum(weight_series)) %>%
+  filter(reason_not_reported_most %in% police_reasons) %>%
+  group_by(crime_type, reason_not_reported_most) %>%
+  summarise(pct = 100 * sum(weight_series) / first(total_unreported),
+            .groups = "drop") %>%
+  mutate(
+    reason_not_reported_most = factor(reason_not_reported_most, levels = rev(police_reasons)),
+    crime_type = fct_reorder(crime_type, pct, .fun = sum)
+  )
+
+```
+
+
+```{r}
+
+p_police <- ggplot(police_detail,
+                   aes(x = pct, y = crime_type, fill = reason_not_reported_most)) +
+  geom_col(width = 0.65) +
+  geom_text(data = police_by_type,
+            aes(x = pct_of_unreported, y = crime_type,
+                label = paste0(round(pct_of_unreported), "%")),
+            inherit.aes = FALSE, hjust = -0.2, fontface = "bold", size = 3.5) +
+  scale_fill_manual(values = c(
+    "Police would not think it important" = "#1d4f91",
+    "Police would be ineffective"         = "#3a86d4",
+    "Police would be biased"              = "#8fbce6",
+    "Offender was a police officer"       = "#cfe2f5"),
+    breaks = police_reasons) +
+  scale_x_continuous(limits = c(0, max(police_by_type$pct_of_unreported) * 1.15),
+                     expand = c(0, 0)) +
+  labs(
+    title = "Unreported Crimes Where the Main Reason Involved the Police",
+    subtitle = "Share of unreported victimizations, by crime type and police-related reason",
+    x = "Percent of unreported victimizations (weighted)", y = NULL, fill = NULL,
+    caption = "Source: National Crime Victimization Survey (BJS), all years pooled."
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top",
+        panel.grid.major.y = element_blank(),
+        plot.title.position = "plot") +
+  guides(fill = guide_legend(nrow = 2))
+
+p_police
+
+```
+
+
+# Statistical support for the reporting claims (NCVS 2020–2023)
+
+All estimates below use the NCVS incident weight adjusted for series crimes (`SERIES_IWEIGHT`). Standard errors and 95% confidence intervals use the NCVS variance strata (`V2117`) and PSUs (`V2118`), and the four survey years are pooled. Incidents with "don't know" or residue on the reported-to-police question are excluded. So are incidents that occurred outside the U.S.
+
+```{r ncvs-design}
+
+ncvs_valid <- main_df %>%
+  filter(reported_police %in% c("Yes", "No"), !is.na(crime_type)) %>%
+  mutate(
+    unreported = as.numeric(reported_police == "No"),
+    # Main reasons with residue / out-of-universe treated as missing
+    nr_main       = fct_drop(fct_recode(reason_not_reported_most, NULL = "Residue", NULL = "Oou")),
+    nr_main_group = fct_drop(fct_recode(reason_not_reported_group, NULL = "Residue", NULL = "Oou")),
+    rep_main_group = fct_drop(fct_recode(reason_reported_group, NULL = "Residue", NULL = "Oou")),
+    # The three expectations about police: dismiss the case, fail to help, treat unfairly
+    police_dismiss = nr_police_not_important,
+    police_no_help = nr_police_ineffective,
+    police_unfair  = nr_police_biased,
+    police_any3    = pmax(police_dismiss, police_no_help, police_unfair),
+    police_main    = case_when(
+      is.na(nr_main) ~ NA_real_,
+      nr_main %in% c("Police would not think it important", "Police would be ineffective",
+                     "Police would be biased") ~ 1,
+      TRUE ~ 0)
+  )
+
+ncvs_des <- svydesign(ids = ~var_psu, strata = ~design_strata, weights = ~weight_series,
+                      nest = TRUE, data = ncvs_valid)
+unrep_des <- subset(ncvs_des, unreported == 1)
+rep_des   <- subset(ncvs_des, unreported == 0)
+n_years   <- n_distinct(ncvs_valid$year)
+
+# Weighted percentage with 95% CI, overall or by a grouping variable
+svy_pct <- function(var, design, by = NULL) {
+  f <- reformulate(var)
+  if (is.null(by)) {
+    est <- svymean(f, design, na.rm = TRUE)
+    grp <- "All"
+  } else {
+    est <- svyby(f, reformulate(by), design, svymean, na.rm = TRUE)
+    grp <- as.character(est[[by]])
+  }
+  ci <- confint(est)
+  tibble(group   = grp,
+         pct     = 100 * as.numeric(coef(est)),
+         ci_low  = 100 * ci[, 1],
+         ci_high = 100 * ci[, 2])
+}
+
+# Distribution of a factor (share in each category) with 95% CI
+svy_dist <- function(var, design) {
+  est <- svymean(reformulate(var), design, na.rm = TRUE)
+  ci  <- confint(est)
+  tibble(category = str_remove(names(coef(est)), paste0("^", var)),
+         pct      = 100 * as.numeric(coef(est)),
+         ci_low   = 100 * ci[, 1],
+         ci_high  = 100 * ci[, 2]) %>%
+    arrange(desc(pct))
+}
+
+fmt_ci <- function(df) {
+  df %>% mutate(across(c(pct, ci_low, ci_high), ~ round(.x, 1)),
+                `95% CI` = paste0("[", ci_low, ", ", ci_high, "]")) %>%
+    select(-ci_low, -ci_high)
+}
+
+c(incidents = nrow(ncvs_valid), unreported = sum(ncvs_valid$unreported))
+
+```
+
+## Claim 1: Most crimes go unreported
+
+```{r claim1}
+
+unrep_overall <- svy_pct("unreported", ncvs_des)
+unrep_class   <- svy_pct("unreported", ncvs_des, by = "crime_class")
+unrep_year    <- svy_pct("unreported", ncvs_des, by = "year")
+
+# Average annual number of unreported victimizations
+unrep_total  <- svytotal(~unreported, ncvs_des)
+annual_unrep <- as.numeric(coef(unrep_total)) / n_years
+
+# One-sided test: is the unreported share above 50%?
+z_half <- (coef(svymean(~unreported, ncvs_des)) - 0.5) / SE(svymean(~unreported, ncvs_des))
+p_half <- pnorm(z_half, lower.tail = FALSE)
+
+claim1_tab <- bind_rows(
+  unrep_overall %>% mutate(level = "Overall"),
+  unrep_class   %>% mutate(level = "Crime class"),
+  unrep_year    %>% mutate(level = "Survey year")
+) %>%
+  select(level, group, pct, ci_low, ci_high) %>%
+  fmt_ci() %>%
+  rename(Level = level, Group = group, `% not reported` = pct)
+
+kable(claim1_tab, caption = "Share of victimizations not reported to police (weighted)")
+
+```
+
+Across 2020–2023, **`r round(unrep_overall$pct, 1)`%** of victimizations (95% CI `r round(unrep_overall$ci_low, 1)`–`r round(unrep_overall$ci_high, 1)`%) were not reported to police. That is about **`r format(round(annual_unrep / 1e6, 1), nsmall = 1)` million** unreported victimizations per year. The share is significantly above 50% (one-sided z = `r round(z_half, 1)`, p `r format.pval(p_half, eps = 0.001)`). Most violent victimizations (`r round(unrep_class$pct[unrep_class$group == "Violent"], 1)`%) and most property victimizations (`r round(unrep_class$pct[unrep_class$group == "Property"], 1)`%) went unreported.
+
+## Claim 2: Reporting varies by crime type
+
+```{r claim2}
+unrep_type <- svy_pct("unreported", ncvs_des, by = "crime_type") %>%
+  left_join(count(ncvs_valid, crime_type, name = "n") %>%
+              mutate(group = as.character(crime_type)) %>% select(-crime_type),
+            by = "group") %>%
+  arrange(desc(pct))
+
+# Rao-Scott design-adjusted chi-square test of independence
+type_test <- svychisq(~unreported + crime_type, ncvs_des)
+type_test
+
+kable(unrep_type %>% fmt_ci() %>%
+        rename(`Crime type` = group, `% not reported` = pct, `Unweighted n` = n),
+      caption = "Share not reported to police, by crime type")
+
+p1 <- ggplot(unrep_type, aes(x = pct, y = fct_reorder(group, pct))) +
+  geom_vline(xintercept = 50, linetype = "dashed", color = "grey60") +
+  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high), height = 0.2, color = "grey40") +
+  geom_point(size = 3, color = "#3a86d4") +
+  scale_x_continuous(limits = c(0, 100)) +
+  labs(x = "Percent not reported", y = NULL,
+       caption = "Source: NCVS Between 2020 and 2023 (BJS)") +
+  theme_minimal(base_size = 15) +
+  theme(plot.title.position = "plot")
+
+p1
+```
+```{r}
+ggsave("unreported_by_type.png", p1, width = 8, height = 5.5, dpi = 600)
+```
+
+
+Non-reporting ranges from **`r round(min(unrep_type$pct))`%** (`r unrep_type$group[which.min(unrep_type$pct)]`) to **`r round(max(unrep_type$pct))`%** (`r unrep_type$group[which.max(unrep_type$pct)]`). The differences are statistically significant (Rao-Scott F = `r round(type_test$statistic, 1)`, p `r format.pval(type_test$p.value, eps = 0.001)`).
+
+## Claim 3: Why victims do and don't report
+
+```{r claim3}
+
+# Main reason for NOT reporting (among unreported victimizations)
+nr_groups <- svy_dist("nr_main_group", unrep_des)
+nr_detail <- svy_dist("nr_main", unrep_des)
+
+# Main reason FOR reporting (among reported victimizations)
+rep_groups <- svy_dist("rep_main_group", rep_des)
+
+kable(fmt_ci(nr_groups) %>% rename(`Main reason for not reporting` = category, `%` = pct),
+      caption = "Main reason for not reporting (grouped), % of unreported victimizations")
+kable(fmt_ci(nr_detail) %>% rename(`Main reason for not reporting` = category, `%` = pct),
+      caption = "Main reason for not reporting (detailed), % of unreported victimizations")
+kable(fmt_ci(rep_groups) %>% rename(`Main reason for reporting` = category, `%` = pct),
+      caption = "Main reason for reporting (grouped), % of reported victimizations")
+
+```
+
+The most common main reason for not reporting falls under **`r nr_groups$category[1]`** (`r round(nr_groups$pct[1], 1)`% of unreported victimizations). Next come **`r nr_groups$category[2]`** (`r round(nr_groups$pct[2], 1)`%) and **`r nr_groups$category[3]`** (`r round(nr_groups$pct[3], 1)`%). Among reported victimizations, the leading main reason is **`r rep_groups$category[1]`** (`r round(rep_groups$pct[1], 1)`%). Note that residue codes are treated as missing here. The pooled charts above count residue in the denominator, so their shares differ slightly.
+
+## Claim 4: When police are the reason
+
+Victims could give more than one reason for not reporting (Q.117), then name the most important one (Q.118). The NCVS has three police-related items that match the expectations of interest:
+
+- **Dismiss the case** (`V4411`): police wouldn't think it was important enough, or wouldn't want to be bothered or get involved.
+- **Fail to help** (`V4412`): police would be inefficient or ineffective (arrive late or not at all, wouldn't do a good job).
+- **Treat them unfairly** (`V4413`): police would be biased, would harass or insult the respondent, or would cause trouble.
+
+```{r claim4}
+police_items <- c(
+  "Dismiss the case (not important / not bothered)" = "police_dismiss",
+  "Fail to help (ineffective)"                      = "police_no_help",
+  "Treat unfairly (biased / harass)"                = "police_unfair",
+  "Any of the three"                                = "police_any3",
+  "Main reason was one of the three"                = "police_main"
+)
+
+police_tab <- imap_dfr(police_items, ~ svy_pct(.x, unrep_des) %>% mutate(item = .y)) %>%
+  select(item, pct, ci_low, ci_high)
+
+# Share of ALL victimizations that went unreported at least partly for these reasons
+ncvs_des <- update(ncvs_des,
+                   police_any3_all = if_else(unreported == 1, police_any3, 0),
+                   police_main_all = if_else(unreported == 1, police_main, 0))
+police_all <- svy_pct("police_any3_all", ncvs_des)
+police_main_all <- svy_pct("police_main_all", ncvs_des)
+annual_police <- as.numeric(coef(svytotal(~police_any3_all, ncvs_des, na.rm = TRUE))) / n_years
+
+kable(police_tab %>% fmt_ci() %>% rename(`Reason (any mention)` = item, `% of unreported` = pct),
+      caption = "Unreported victimizations where victims expected police to dismiss, fail to help, or treat them unfairly")
+
+# By crime type, class, and year
+police_type  <- svy_pct("police_any3", unrep_des, by = "crime_type") %>% arrange(desc(pct))
+police_class <- svy_pct("police_any3", unrep_des, by = "crime_class")
+police_year  <- svy_pct("police_any3", unrep_des, by = "year")
+police_type_test <- svychisq(~police_any3 + crime_type, unrep_des)
+
+kable(bind_rows(police_class %>% mutate(Level = "Crime class"),
+                police_type  %>% mutate(Level = "Crime type"),
+                police_year  %>% mutate(Level = "Survey year")) %>%
+        relocate(Level) %>% fmt_ci() %>%
+        rename(Group = group, `% of unreported citing any of the three` = pct),
+      caption = "Police-related reasons (any mention) by crime class, type, and year")
+
+police_type_test
+```
+
+
+```{r claim4-plot}
+
+police_detail_any <- imap_dfr(police_items[1:3],
+                              ~ svy_pct(.x, unrep_des, by = "crime_type") %>% mutate(item = .y)) %>%
+  mutate(item = factor(item, levels = names(police_items)[1:3]),
+         group = factor(group, levels = rev(police_type$group)))
+
+p_police_reason <- ggplot(police_detail_any, aes(x = pct, y = group, color = item)) +
+  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high), height = 0,
+                 position = position_dodge(width = 0.6), alpha = 0.6) +
+  geom_point(size = 2.6, position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("#1d4f91", "#3a86d4", "#e07a3a")) +
+  labs(x = "Percent of unreported victimizations", y = NULL, color = NULL) +
+  theme_minimal(base_size = 16) +
+  theme(legend.position = "top", plot.title.position = "plot") +
+  guides(color = guide_legend(nrow = 2))
+
+p_police_reason
+```
+
+```{r}
+ggsave("police_reasons_by_type.png", p_police_reason, width = 10, height = 6.5, dpi = 600)
+```
+
+Among unreported victimizations, **`r round(police_tab$pct[police_tab$item == "Any of the three"], 1)`%** (95% CI `r round(police_tab$ci_low[police_tab$item == "Any of the three"], 1)`–`r round(police_tab$ci_high[police_tab$item == "Any of the three"], 1)`%) went unreported at least partly because the victim expected police to dismiss the case, fail to help, or treat them unfairly. By item:
+
+- **Dismiss the case:** `r round(police_tab$pct[1], 1)`%
+- **Fail to help:** `r round(police_tab$pct[2], 1)`%
+- **Treat unfairly:** `r round(police_tab$pct[3], 1)`%
+
+One of these was the *most important* reason for `r round(police_tab$pct[5], 1)`% of unreported victimizations. Across all victimizations, reported or not, `r round(police_all$pct, 1)`% went unreported at least partly for these reasons. That is roughly **`r format(round(annual_police / 1e6, 1), nsmall = 1)` million victimizations per year**.
+
+
+```{r}
+
+trend_df <- police_year %>%
+  mutate(year = as.numeric(as.character(group)))
+
+p_police_trend <- ggplot(trend_df, aes(x = year, y = pct)) +
+  geom_ribbon(aes(ymin = ci_low, ymax = ci_high), fill = "#e07a3a", alpha = 0.15) +
+  geom_line(color = "#e07a3a", linewidth = 1.4) +
+  geom_point(color = "#e07a3a", size = 4) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")),
+            vjust = -1.4, fontface = "bold", size = 5.5) +
+  scale_x_continuous(breaks = trend_df$year) +
+  scale_y_continuous(limits = c(0, 40), breaks = seq(0, 40, 10),
+                     labels = function(x) paste0(x, "%"), expand = c(0, 0)) +
+  labs(
+    title = "Victims Increasingly Cite Distrust of Police as a Reason Not to Report",
+    subtitle = "Share of unreported victimizations where the victim expected police to dismiss the case,\nfail to help, or treat them unfairly",
+    x = NULL, y = "Percent of unreported victimizations"
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 13),
+    plot.caption = element_text(size = 10, hjust = 0),
+    axis.text = element_text(size = 14),
+    plot.title.position = "plot",
+    plot.caption.position = "plot"
+  )
+
+p_police_trend
+```
+
+```{r}
+ggsave("police_reasons_trend.png", p_police_trend, width = 10, height = 6.5, dpi = 600)
+```
+
+
+# Past police violations and willingness to contact police (PPCS 2020 and 2022)
+
+```{r}
+`38872.0001.Data` <- read.delim("ICPSR_38872/DS0001/38872-0001-Data.tsv")
+
+`38320.0001.Data` <- read.delim("ICPSR_38320/DS0001/38320-0001-Data.tsv")
+```
+
+
+```{r}
+
+ppcs_vars <- c("PPCSWGT", "PSSTRATA", "SECUCODE", "AGE", "SEX", "HISP", "INCOME",
+               "V351A", "V351B", "V352A", "V352B", "V352C", "V352D", "V352E",
+               "V342", "V23A", "V23B", "V23C", "V24D")
+
+ppcs22 <- `38872.0001.Data` %>% select(all_of(ppcs_vars)) %>% mutate(year = 2022)
+
+ppcs20 <- `38320.0001.Data` %>% select(all_of(ppcs_vars)) %>% mutate(year = 2020)
+
+ppcs <- bind_rows(ppcs20, ppcs22)
+```
+
+**Outcome.** `V342` asks: *"Would you be more likely, less likely, or just as likely to contact the police in the future?"* It is asked of respondents whose most recent police contact in the past 12 months they initiated themselves: reporting a crime, reporting a non-crime emergency, asking for non-emergency help, or seeking help for something else. The main outcome is **less likely to contact police in the future** (1) versus just as or more likely (0). An ordered logit on all three categories serves as a robustness check. "Don't know" and refused are excluded.
+
+**Violations and threats.** All yes/no items are coded 1 = Yes, 2 = No in the PPCS.
+
+- *During the most recent contact* (`V351A`/`V351B`, asked only for face-to-face contacts): police used force; police threatened force.
+- *During earlier contacts in the past 12 months* (`V352A`–`E`, asked only of respondents with more than one contact): police used force; threatened force; used a slur or degrading name; made a sexual comment; touched the respondent sexually.
+
+Respondents outside an item's universe are coded 0 for that item. That means a contact that wasn't face-to-face, or no earlier contact, so no such event was possible. "Don't know", residue, and refused are coded missing. Restricting each block to its own universe is shown as a robustness check.
+
+**Controls.** Sex, age group, race/ethnicity, and household income, plus survey year. Income is harmonized to under $75,000 versus $75,000 or more, because the 2022 file collapses the lower categories.
+
+**Design.** Models are survey-weighted logits (`PPCSWGT`), with variance strata `PSSTRATA` (nested within year) and PSU `SECUCODE`.
+
+```{r ppcs-recode}
+
+# 1 = Yes; 2 = No and 9 = out of universe (no such event possible) -> 0; DK/residue/refused -> NA
+yes_no <- function(x) case_when(x == 1 ~ 1, x %in% c(2, 9) ~ 0, TRUE ~ NA_real_)
+
+ppcs_model <- ppcs %>%
+  filter(V342 %in% 1:3) %>%                       # asked, and gave a substantive answer
+  mutate(
+    contact_future = factor(V342, levels = c(2, 3, 1),
+                            labels = c("Less likely", "Just as likely", "More likely"),
+                            ordered = TRUE),
+    less_likely_contact_01 = as.numeric(V342 == 2),
+    face_to_face   = V351A != 9,                  # in universe for current-contact items
+    multi_contact  = V352A != 9,                  # in universe for earlier-contact items
+    across(c(V351A, V351B, V352A, V352B, V352C, V352D, V352E), yes_no),
+    force_now      = V351A,
+    threat_now     = V351B,
+    force_prior    = V352A,
+    threat_prior   = V352B,
+    slur_prior     = V352C,
+    sexual_prior   = pmax(V352D, V352E),          # sexual comment or sexual touching
+    force_any      = pmax(force_now, force_prior),
+    threat_any     = pmax(threat_now, threat_prior),
+    prior_violation = pmax(force_prior, threat_prior, slur_prior, sexual_prior),
+    any_violation  = pmax(force_any, threat_any, slur_prior, sexual_prior),
+    # Mutually exclusive "most serious" type of violation
+    violation_type = case_when(
+      is.na(any_violation)                 ~ NA_character_,
+      force_any == 1                       ~ "Force used",
+      threat_any == 1                      ~ "Threat of force only",
+      slur_prior == 1 | sexual_prior == 1  ~ "Slur or sexual misconduct only",
+      TRUE                                 ~ "None"),
+    violation_type = factor(violation_type, levels = c("None", "Threat of force only", "Force used",
+                                                       "Slur or sexual misconduct only")),
+    sex      = factor(SEX, 1:2, c("Male", "Female")),
+    age      = factor(AGE, 1:5, c("16-17", "18-24", "25-44", "45-64", "65+")),
+    race_eth = factor(HISP, 1:5, c("White", "Black", "Hispanic", "Asian", "Other")),
+    income   = factor(if_else(INCOME == 4, "$75,000+", "Under $75,000"),
+                      levels = c("Under $75,000", "$75,000+")),
+    year     = factor(year),
+    strata   = interaction(year, PSSTRATA, drop = TRUE)
+  ) %>%
+  filter(!is.na(any_violation))
+
+# Cell sizes: violations are rare, so check how many respondents fall in each group
+ppcs_model %>%
+  count(violation_type, contact_future) %>%
+  pivot_wider(names_from = contact_future, values_from = n, values_fill = 0) %>%
+  kable(caption = "Unweighted counts: violation type by future-contact intention")
+
+ppcs_model %>%
+  summarise(across(c(force_now, threat_now, force_prior, threat_prior, slur_prior, sexual_prior),
+                   ~ sum(.x, na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "item", values_to = "n_yes") %>%
+  kable(caption = "Unweighted number of respondents reporting each violation")
+
+```
+
+```{r ppcs-models}
+
+des <- svydesign(ids = ~SECUCODE, strata = ~strata, weights = ~PPCSWGT,
+                 nest = TRUE, data = ppcs_model)
+
+controls <- "+ sex + age + race_eth + income + year"
+fit <- function(rhs, design = des) {
+  svyglm(as.formula(paste("less_likely_contact_01 ~", rhs, controls)),
+         design = design, family = quasibinomial())
+}
+
+m0 <- svyglm(less_likely_contact_01 ~ any_violation, design = des,
+             family = quasibinomial())                                    # unadjusted
+m1 <- fit("any_violation")                                                # any violation
+m2 <- fit("violation_type")                                               # most serious type
+m3 <- fit("force_any + threat_any + slur_prior + sexual_prior")           # each type, jointly
+m4 <- fit("force_now + threat_now + prior_violation")                     # timing
+
+coef_labels <- c(
+  "any_violation" = "Any violation or threat",
+  "violation_typeThreat of force only" = "Type: threat of force only",
+  "violation_typeForce used" = "Type: force used",
+  "violation_typeSlur or sexual misconduct only" = "Type: slur or sexual misconduct only",
+  "force_any" = "Force used (any contact)",
+  "threat_any" = "Threat of force (any contact)",
+  "slur_prior" = "Slur / degrading name (earlier contact)",
+  "sexual_prior" = "Sexual comment or touching (earlier contact)",
+  "force_now" = "Force used (most recent contact)",
+  "threat_now" = "Threat of force (most recent contact)",
+  "force_prior" = "Force used (earlier contact)",
+  "threat_prior" = "Threat of force (earlier contact)",
+  "prior_violation" = "Any violation (earlier contacts)",
+  "sexFemale" = "Female",
+  "age18-24" = "Age 18-24", "age25-44" = "Age 25-44",
+  "age45-64" = "Age 45-64", "age65+" = "Age 65+",
+  "race_ethBlack" = "Black", "race_ethHispanic" = "Hispanic",
+  "race_ethAsian" = "Asian", "race_ethOther" = "Other race",
+  "income$75,000+" = "Income $75,000+",
+  "year2022" = "Year 2022",
+  "(Intercept)" = "Constant")
+
+modelsummary(
+  list("Unadjusted" = m0, "Any violation" = m1, "Most serious type" = m2,
+       "Each type" = m3, "Timing" = m4),
+  exponentiate = TRUE, stars = c("+" = .1, "*" = .05, "**" = .01, "***" = .001),
+  coef_map = coef_labels, gof_map = "nobs",
+  title = "Survey-weighted logistic regression: less likely to contact police in the future (odds ratios, SEs in parentheses)",
+  notes = "Reference categories: male, age 16-17, White, income under $75,000, 2020. Design-based SEs (PSSTRATA, SECUCODE)."
+)
+
+```
+
+### Average marginal effects (percentage points)
+
+Odds ratios are hard to read for a rare outcome, so the table below converts them to average changes in the probability of saying "less likely to contact police."
+
+```{r ppcs-ame}
+ame <- bind_rows(
+  avg_slopes(m1, variables = "any_violation", wts = "(weights)") %>% as.data.frame(),
+  avg_slopes(m2, variables = "violation_type", wts = "(weights)") %>% as.data.frame(),
+  avg_slopes(m3, variables = c("force_any", "threat_any", "slur_prior", "sexual_prior"),
+             wts = "(weights)") %>% as.data.frame(),
+  avg_slopes(m4, variables = c("force_now", "threat_now", "prior_violation"),
+             wts = "(weights)") %>% as.data.frame(),
+  .id = "model"
+) %>%
+  mutate(model = c("Any violation", "Most serious type", "Each type", "Timing")[as.integer(model)],
+         term = if_else(term == "violation_type", paste("Type:", contrast), term),
+         across(c(estimate, conf.low, conf.high), ~ round(100 * .x, 1)),
+         p.value = format.pval(p.value, digits = 2, eps = 0.001)) %>%
+  select(Model = model, Term = term, `AME (pp)` = estimate,
+         `CI low` = conf.low, `CI high` = conf.high, p = p.value)
+
+kable(ame, caption = "Average marginal effects on P(less likely to contact police), percentage points")
+```
+
+```{r}
+# ---- Predicted probabilities by most serious violation type ----
+pred_df <- avg_predictions(m2, by = "violation_type", wts = "(weights)") %>%
+  as.data.frame() %>%
+  left_join(count(ppcs_model, violation_type, name = "n"), by = "violation_type")
+
+p_pred <- ggplot(pred_df, aes(x = violation_type, y = estimate * 100,
+                              fill = violation_type == "None")) +
+  geom_col(width = 0.55) +
+  geom_errorbar(aes(ymin = pmax(conf.low, 0) * 100, ymax = conf.high * 100), width = 0.12) +
+  geom_text(aes(label = paste0(round(estimate * 100), "%\n(n = ", n, ")"),
+                y = conf.high * 100), vjust = -0.3, size = 3.6) +
+  scale_fill_manual(values = c("TRUE" = "#3a86d4", "FALSE" = "#e07a3a"), guide = "none") +
+  scale_x_discrete(labels = function(x) str_wrap(x, 16)) +
+  scale_y_continuous(limits = c(0, max(pred_df$conf.high * 100) * 1.25), expand = c(0, 0)) +
+  labs(
+    x = "Most serious violation or threat experienced in the past 12 months",
+    y = "Predicted percent (95% CI)",
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(panel.grid.major.x = element_blank(), plot.title.position = "plot")
+
+p_pred
+```
+
+```{r}
+ggsave("ppcs_predicted.png", p_pred, width = 8, height = 5.5, dpi = 600)
+```
+
+### Robustness checks
+
+```{r ppcs-robustness}
+# (a) Ordered logit on all three response categories (higher = more likely to contact)
+o1 <- svyolr(contact_future ~ any_violation + sex + age + race_eth + income + year, design = des)
+o2 <- svyolr(contact_future ~ violation_type + sex + age + race_eth + income + year, design = des)
+
+# (b) Restrict each block of items to the respondents who were actually asked it
+r_face  <- fit("force_now + threat_now", design = subset(des, face_to_face))
+r_multi <- fit("force_prior + threat_prior + slur_prior + sexual_prior", design = subset(des, multi_contact))
+
+modelsummary(
+  list("Ordered logit: any" = o1, "Ordered logit: type" = o2,
+       "Face-to-face only" = r_face, "Multiple contacts only" = r_multi),
+  exponentiate = TRUE, stars = c("+" = .1, "*" = .05, "**" = .01, "***" = .001),
+  coef_map = coef_labels[!names(coef_labels) %in% "(Intercept)"], gof_map = "nobs",
+  title = "Robustness checks (odds ratios)",
+  notes = "Ordered logits: OR < 1 means lower odds of a more-likely response. Columns 3-4 model 'less likely' (binary) within each item's universe."
+)
+```
+
+**Interpretation notes.**
+
+- Violations are rare: roughly 1% of the analytic sample reports any violation or threat. Estimates for slurs and sexual misconduct rest on a few dozen cases or fewer, so they are imprecise and should be read as suggestive.
+- Force and threats of force overlap heavily. Most people who had force used against them were also threatened. The "most serious type" model separates them into mutually exclusive groups.
+- The data are cross-sectional and the outcome is self-reported, so these associations are not causal. Respondents who already distrust police may both report more violations and say they are less likely to call.
