@@ -12,3 +12,7 @@ ICPSR_*/
 *_files/
 
 .DS_Store
+
+# Quarto site build output
+site/_site/
+site/.quarto/

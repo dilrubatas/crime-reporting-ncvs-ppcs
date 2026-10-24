@@ -1,0 +1,18 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Why Crime Goes Unreported"
+  site-url: https://dilrubatas.github.io/crime-reporting-ncvs-ppcs/
+  description: "Two in three victimizations never reach police, and distrust of police is a growing reason. Findings from the NCVS 2020–2023 and PPCS."
+  image: figures/police_reasons_trend.png
+  open-graph: true
+  twitter-card: true
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: false
+    page-layout: article

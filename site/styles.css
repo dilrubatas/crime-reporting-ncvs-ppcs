@@ -1,0 +1,29 @@
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.stat {
+  border-left: 4px solid #e07a3a;
+  padding: 0.5rem 0.9rem;
+  background: #fbf6f2;
+}
+
+.stat .num {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #e07a3a;
+}
+
+.stat .lbl {
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.stat.blue { border-left-color: #3a86d4; background: #f2f7fc; }
+.stat.blue .num { color: #3a86d4; }
+
+.byline { color: #666; }
