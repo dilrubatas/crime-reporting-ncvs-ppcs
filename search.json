@@ -1,0 +1,37 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Why Crime Goes Unreported",
+    "section": "",
+    "text": "Dilruba Tas · Full analysis and code on GitHub"
+  },
+  {
+    "objectID": "index.html#most-crime-never-reaches-the-police",
+    "href": "index.html#most-crime-never-reaches-the-police",
+    "title": "Why Crime Goes Unreported",
+    "section": "1. Most crime never reaches the police",
+    "text": "1. Most crime never reaches the police\nFrom 2020 to 2023, 65% of victimizations (95% CI 64–66%) went unreported. That’s about 11.5 million a year. The share was steady across all four years.\nReporting depends heavily on the crime. Motor vehicle theft goes unreported only 23% of the time. The top reason victims give for reporting it is getting help or recovering losses. Rape and sexual assault (72%) and other theft (73%) are the least reported. The differences between crime types are statistically significant."
+  },
+  {
+    "objectID": "index.html#distrust-of-police-is-a-major-reason-and-a-growing-one",
+    "href": "index.html#distrust-of-police-is-a-major-reason-and-a-growing-one",
+    "title": "Why Crime Goes Unreported",
+    "section": "2. Distrust of police is a major reason, and a growing one",
+    "text": "2. Distrust of police is a major reason, and a growing one\nWhen victims explained their decision, the most common main reason was that the crime wasn’t important enough (29% of unreported victimizations). Next came police-related reasons (24%).\nVictims could name more than one reason. In 29% of unreported victimizations, the victim expected police to dismiss the case, fail to help, or treat them unfairly. That’s roughly 3.3 million victimizations a year. By far the most common expectation was that police wouldn’t think the case was important (23%).\nThe combined share rose every year, from 25.5% in 2020 to 31.5% in 2023. The 2020 and 2023 confidence intervals don’t overlap."
+  },
+  {
+    "objectID": "index.html#bad-police-encounters-are-linked-to-less-willingness-to-call-again",
+    "href": "index.html#bad-police-encounters-are-linked-to-less-willingness-to-call-again",
+    "title": "Why Crime Goes Unreported",
+    "section": "3. Bad police encounters are linked to less willingness to call again",
+    "text": "3. Bad police encounters are linked to less willingness to call again\nThe Police-Public Contact Survey asked people who had contacted police themselves whether they’d be more or less likely to do so again. Among people with no police violation or threat in the past year, the model predicts about 6% would say they were less likely. Among those who experienced force, a threat of force, a slur, or sexual misconduct, that rose by about 12 percentage points (95% CI 6–19), after adjusting for sex, age, race and ethnicity, income, and year.\n\nViolations are rare (about 1% of respondents), so estimates for each type are imprecise. The data are cross-sectional, so this is an association, not proof of cause."
+  },
+  {
+    "objectID": "index.html#about-the-data",
+    "href": "index.html#about-the-data",
+    "title": "Why Crime Goes Unreported",
+    "section": "About the data",
+    "text": "About the data\n\nNCVS (Bureau of Justice Statistics, via ICPSR): 35,181 victimizations from 2020–2023, weighted for series crimes. Standard errors account for the survey design. Incidents outside the U.S. and “don’t know” responses are excluded.\nPPCS 2020 and 2022: 18,965 residents age 16+ whose most recent police contact they initiated. Estimates come from survey-weighted logistic regression.\n\nCode, tables, and robustness checks are in the GitHub repository."
+  }
+]
